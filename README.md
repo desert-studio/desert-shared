@@ -4,7 +4,7 @@ The formats and small code that the Desert **engine** and the Desert **launcher*
 identically. Both consume this repository as a **git submodule**. If a change makes the two sides
 disagree about a byte on disk or an argument on a command line, it belongs here — nowhere else.
 
-## ⚠ Submodules do NOT update automatically / Сабмодули НЕ обновляются сами
+## ⚠ Submodules do NOT update automatically
 
 A submodule pointer is **pinned to one commit**. Pushing a new commit to this repository changes
 **nothing** in the engine or the launcher: each consumer keeps building the exact commit its
@@ -17,10 +17,10 @@ git fetch && git checkout <new-sha>
 cd - && git add ThirdParty/desert-shared && git commit
 ```
 
-По-русски и прямо: **обновление этого репозитория не доезжает до движка и лаунчера само.**
-Указатель сабмодуля прикреплён к конкретному коммиту; каждый потребитель поднимает его вручную,
-отдельным коммитом у себя. Несинхронный подъём безопасен ровно настолько, насколько форматы
-миграционно совместимы — поэтому формат меняется **только здесь и только вместе с тестом**.
+Consumers may therefore sit on **different commits of this repository at the same time**, and that
+is safe exactly as far as the formats stay migration-compatible. Which is why a format changes
+**only here, and only together with the test that pins it** — the conformance suite is what makes an
+out-of-step pointer a survivable state rather than a silent disagreement about a byte on disk.
 
 ## What lives here
 
