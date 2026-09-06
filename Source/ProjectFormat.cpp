@@ -1,4 +1,6 @@
-#include <DesertShared/ProjectFormat.hpp>
+// Relative on purpose — the file is compiled by each host, and this way it needs no include
+// path beyond its own repository.
+#include "../Include/DesertShared/ProjectFormat.hpp"
 
 #include <rflcpp/rfl/json.hpp>
 

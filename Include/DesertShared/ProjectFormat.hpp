@@ -25,7 +25,10 @@
 // Host-supplied dependencies: reflect-cpp (the serializer in Source/ProjectFormat.cpp) and the
 // fmt headers (via ResultStr.hpp).
 
-#include <DesertShared/ResultStr.hpp>
+// Same-directory include ON PURPOSE: consumers reach this header through host-side redirect
+// headers whose projects do not all carry an include path for this repo; a quoted same-dir
+// include resolves relative to THIS file and works for every one of them.
+#include "ResultStr.hpp"
 
 #include <array>
 #include <string>
