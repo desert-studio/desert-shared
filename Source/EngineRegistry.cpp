@@ -40,7 +40,16 @@ namespace Common::Engine
         // the same commit keep the order they were registered in rather than swapping every start.
         std::stable_sort( registry.Engines.begin(), registry.Engines.end(),
                           []( const EngineInstall& a, const EngineInstall& b )
-                          { return a.CommitCount > b.CommitCount; } );
+                          {
+                              // A known build always outranks an unknown one, and two unknowns keep
+                              // the order they were registered in. Comparing optionals directly would
+                              // make "unknown" the smallest number rather than no number at all.
+                              if ( a.CommitCount.has_value() != b.CommitCount.has_value() )
+                                  return a.CommitCount.has_value();
+                              if ( !a.CommitCount.has_value() )
+                                  return false;
+                              return *a.CommitCount > *b.CommitCount;
+                          } );
     }
 
     const EngineInstall* PreferredInstall( const EngineRegistry& registry )

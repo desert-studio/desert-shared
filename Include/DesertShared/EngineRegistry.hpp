@@ -19,6 +19,7 @@
 // Same-directory include for the same reason as ProjectFormat.hpp — see the note there.
 #include "ResultStr.hpp"
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -35,7 +36,12 @@ namespace Common::Engine
     {
         std::string Root;          // absolute path to the engine root (the folder holding Templates/)
         std::string VersionFull;   // display version, e.g. "0.1.316"
-        int         CommitCount = 0; // build number; the ordering key when two installs share a version
+        // BUILD NUMBER, AND IT IS OPTIONAL ON PURPOSE. It is the ordering key when two installs share
+        // a version — and 0 must never stand in for "not known". The engine emits no commit count at
+        // all when git cannot be trusted (a shallow clone, an archive with no history), and a zero
+        // there would silently lose every comparison it was never entered into: the install would sort
+        // last and a real engine would be passed over for one nobody can identify. Absent means absent.
+        std::optional<int> CommitCount;
     };
 
     struct EngineRegistry
