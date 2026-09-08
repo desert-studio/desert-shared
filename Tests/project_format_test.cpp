@@ -141,6 +141,95 @@ TEST( ProjectFormat, RegistryFieldNamesArePinned )
     EXPECT_EQ( read.GetValue().Projects[0].LastOpened, 17 );
 }
 
+// ── K11: a key this build does not declare is not this build's to delete ─────────────────────────
+//
+// The relation, once, for every file this header describes: A FILE READ AND WRITTEN BACK WITH NO
+// CHANGE IS BYTE-IDENTICAL TO WHAT WAS READ. It is one assertion and it closes the whole class,
+// because the only way to break it is for the writer to enumerate something other than the file —
+// which is precisely what `rfl::json::write` on a fixed struct does, and what ForeignKeys repairs.
+//
+// Why these files and not just any: `.deproj` is TRACKED BY GIT, so a stripped key travels to the
+// whole team in a commit; and the registries have TWO WRITERS IN TWO REPOSITORIES, so the two
+// builds cannot be kept in step by one release. A git revert to last week's engine was enough.
+
+TEST( ProjectFormatForeignKeys, ADescriptorReadAndWrittenBackUnchangedIsByteIdentical )
+{
+    // Written by "a newer build": three keys this one has never heard of, at three different JSON
+    // shapes, because a scalar surviving proves nothing about an object or an array.
+    const std::string fromTheFuture =
+         R"({"FileVersion":1,"Name":"Dune Racer","AssetsRoot":"Assets","DefaultScene":"","Description":"",)"
+         R"("EngineVersion":"","PrimaryPlatform":"Switch","Collections":["A","B"],)"
+         R"("Packaging":{"Compress":true,"Level":9}})";
+
+    auto parsed = ReadProjectFile( fromTheFuture );
+    ASSERT_TRUE( parsed.IsSuccess() ) << parsed.GetError();
+    EXPECT_EQ( WriteProjectFile( parsed.GetValue() ), fromTheFuture )
+         << "reading and writing back with no change altered the file";
+}
+
+TEST( ProjectFormatForeignKeys, AnEditToOneFieldLeavesEveryOtherKeyAloneIncludingTheOnesThisBuildCannotName )
+{
+    const std::string fromTheFuture =
+         R"({"FileVersion":1,"Name":"Old","AssetsRoot":"Assets","DefaultScene":"","Description":"",)"
+         R"("EngineVersion":"","PrimaryPlatform":"Switch"})";
+
+    auto parsed = ReadProjectFile( fromTheFuture );
+    ASSERT_TRUE( parsed.IsSuccess() ) << parsed.GetError();
+    ProjectFile edited = parsed.ExtractValue();
+    edited.Name        = "New"; // exactly what the launcher's settings screen does
+
+    const std::string written = WriteProjectFile( edited );
+    EXPECT_NE( written.find( R"("Name":"New")" ), std::string::npos ) << written;
+    EXPECT_NE( written.find( R"("PrimaryPlatform":"Switch")" ), std::string::npos )
+         << "a key the writer does not declare was deleted by an edit to an unrelated field: " << written;
+}
+
+TEST( ProjectFormatForeignKeys, TheCarrierIsNeverAKeYInTheFile )
+{
+    // ExtraFields is spread FLAT at the struct's own level. If it ever serialized as a member, the
+    // file would grow a key called "UnknownKeys" and every consumer would inherit it as a field.
+    EXPECT_EQ( WriteProjectFile( ProjectFile{} ).find( "UnknownKeys" ), std::string::npos )
+         << WriteProjectFile( ProjectFile{} );
+    EXPECT_EQ( WriteProjectsRegistry( ProjectsRegistry{} ).find( "UnknownKeys" ), std::string::npos )
+         << WriteProjectsRegistry( ProjectsRegistry{} );
+}
+
+TEST( ProjectFormatForeignKeys, TheRegistryKeepsForeignKeysAtBothItsLevels )
+{
+    // Two levels, because the two writers can disagree at either: the registry itself (a launcher
+    // that starts remembering a window layout) and a single record (a build that starts pinning
+    // projects). Both must survive the OTHER program's next write.
+    const std::string fromTheFuture =
+         R"({"FileVersion":1,"Projects":[{"Path":"/a/A.deproj","LastOpened":17,"Pinned":true}],)"
+         R"("LastUsedTemplate":"Blank"})";
+
+    auto parsed = ReadProjectsRegistry( fromTheFuture );
+    ASSERT_TRUE( parsed.IsSuccess() ) << parsed.GetError();
+    ASSERT_EQ( parsed.GetValue().Projects.size(), 1u );
+    EXPECT_EQ( WriteProjectsRegistry( parsed.GetValue() ), fromTheFuture )
+         << "a foreign key was dropped from the registry or from one of its records";
+
+    // And the ordinary mutation both hosts perform must not lose them either.
+    ProjectsRegistry promoted = parsed.ExtractValue();
+    PromoteRecent( promoted, "/b/B.deproj", 99 );
+    const std::string written = WriteProjectsRegistry( promoted );
+    EXPECT_NE( written.find( R"("Pinned":true)" ), std::string::npos ) << written;
+    EXPECT_NE( written.find( R"("LastUsedTemplate":"Blank")" ), std::string::npos ) << written;
+}
+
+TEST( ProjectFormatForeignKeys, ARegistryMigratedFromTheFlatListCarriesNoLeftovers )
+{
+    // The legacy shape has exactly one key and the migration builds a fresh registry from it, so
+    // there is nothing to preserve — asserted rather than assumed, because a carrier that picked up
+    // "Projects" from the old file would write the old list back beside the new one.
+    auto migrated = ReadProjectsRegistry( R"({"Projects":["/p/A.deproj"]})" );
+    ASSERT_TRUE( migrated.IsSuccess() ) << migrated.GetError();
+    const std::string written = WriteProjectsRegistry( migrated.GetValue() );
+    EXPECT_NE( written.find( R"("Path":"/p/A.deproj")" ), std::string::npos ) << written;
+    EXPECT_EQ( written.find( R"("Projects":["/p/A.deproj"])" ), std::string::npos )
+         << "the flat list survived alongside the migrated one: " << written;
+}
+
 TEST( ProjectFormat, TheWriterStampsTheVersionAndTheStructDefaultMeansUnversioned )
 {
     // The relation this pins is between the two meanings of the field, which a single default

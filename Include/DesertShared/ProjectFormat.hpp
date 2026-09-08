@@ -22,13 +22,24 @@
 // asserts the relation between the folder census below and its own Constants::Path globals in its
 // own suite (Desert/Tests/Engine/ProjectFormat).
 //
-// Host-supplied dependencies: reflect-cpp (the serializer in Source/ProjectFormat.cpp) and the
-// fmt headers (via ResultStr.hpp).
+// Host-supplied dependencies: reflect-cpp (the serializer in Source/ProjectFormat.cpp, AND this
+// header since the structs below carry an rfl::ExtraFields member) and the fmt headers (via
+// ResultStr.hpp).
+//
+// WHY THIS HEADER NOW INCLUDES reflect-cpp. It used to be deliberately serializer-free, on the
+// grounds that a format description should not know how it is written. That stopped being possible
+// when the format had to describe what it does with a key it does NOT declare: "preserved" is a
+// property of the struct, not of the writer, and expressing it anywhere else would put the answer
+// in one host and not the other — which is the exact fork these files exist to prevent. Both hosts
+// already link reflect-cpp to call the two functions at the bottom.
 
 // Same-directory include ON PURPOSE: consumers reach this header through host-side redirect
 // headers whose projects do not all carry an include path for this repo; a quoted same-dir
 // include resolves relative to THIS file and works for every one of them.
 #include "ResultStr.hpp"
+
+#include <rflcpp/rfl/ExtraFields.hpp>
+#include <rflcpp/rfl/Generic.hpp>
 
 #include <array>
 #include <string>
@@ -37,6 +48,30 @@
 
 namespace Common::Project
 {
+    // EVERY OTHER KEY THE FILE HAPPENS TO CONTAIN — not a field, and not a key of its own.
+    //
+    // rfl::ExtraFields is spread FLAT at its struct's own level on write and captures every key at
+    // that level the declared members did not claim on read, so no file ever gains a key called
+    // "UnknownKeys". It is the file's leftovers, carried from a read to the next write.
+    //
+    // WHY IT HAS TO EXIST (K11, and it is the third time this project has paid for the same shape).
+    // Every write here is `rfl::json::write( stamped )`, which rebuilds the whole file from the
+    // struct THIS binary was compiled with — so enumeration goes by the struct and not by the file,
+    // and a key the binary has never heard of is deleted by the act of writing anything at all.
+    // These particular files make that worse than usual in two ways at once: `.deproj` is TRACKED BY
+    // GIT and shared by a whole team, so the deletion travels; and the registries have TWO WRITERS
+    // IN TWO REPOSITORIES, so the two builds are not even the same program and cannot be kept in
+    // step by a single release. A git revert to last week's engine used to be enough to silently
+    // strip a field a newer build had written.
+    //
+    // IT DOES NOT KEEP LEGACY ALIVE (contract §4). A key this project DELETED on purpose is not
+    // unknown, it is retired, and a retired key is dropped BY NAME by a migration that says so.
+    // Preservation is for keys another BUILD owns; the deletion path decides a key is dead, never
+    // the accident of which binary wrote last.
+    //
+    // (The first two were П3 and К9 — see Editor::EditorPreferences::UnknownKeys for editor.json.)
+    using ForeignKeys = rfl::ExtraFields<rfl::Generic>;
+
     // The version stamped into a `.deproj` this build writes. Scenes have carried a version since
     // they existed; the descriptor did not, so a field added to it could only ever be detected by
     // its absence — which stops being enough the moment a field changes MEANING rather than
@@ -67,6 +102,8 @@ namespace Common::Project
         // The engine version that last wrote this descriptor, for diagnosis and for the collection
         // compatibility check — NOT for choosing an engine (L2 §2.3 refuses a per-project picker).
         std::string EngineVersion = "";
+
+        ForeignKeys UnknownKeys; // see ForeignKeys above — NOT a field of the format
     };
 
     // One line of the recent-projects registry.
@@ -82,6 +119,8 @@ namespace Common::Project
     {
         std::string Path;           // the .deproj path, verbatim
         long long   LastOpened = 0; // Unix seconds UTC; 0 = never recorded
+
+        ForeignKeys UnknownKeys; // see ForeignKeys above — NOT a field of the format
     };
 
     // ~/.desertengine/projects.json — the recent-projects registry.
@@ -98,6 +137,8 @@ namespace Common::Project
     {
         int                        FileVersion = 0; // stamped by the writer — see ProjectFile::FileVersion
         std::vector<ProjectRecord> Projects;
+
+        ForeignKeys UnknownKeys; // see ForeignKeys above — NOT a field of the format
     };
 
     // <engine-root>/Templates/<Id>/template.json — one starter template, as DATA.
