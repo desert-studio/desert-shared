@@ -15,6 +15,7 @@
 #include <variant>
 #include <string>
 #include <type_traits>
+#include <cstdio>
 
 #include <spdlog/fmt/fmt.h>
 
@@ -22,6 +23,52 @@
 
 namespace Common
 {
+    // WHO SHOUTS WHEN A FAILED RESULT IS UNWRAPPED ANYWAY.
+    //
+    // `GetValue()`/`ExtractValue()` on a FAILED result used to hand back a default-constructed T in
+    // total silence, so a failure read as a success holding nothing — the exact shape the delivery
+    // contract §1.4 forbids ("an empty successful answer is a silent wrong answer, not a refusal"),
+    // living inside the very type that §1.4 is enforced with. For a handle type that default is
+    // `VK_NULL_HANDLE`; for a shared_ptr it is null; and in every case the caller's next line
+    // proceeds as if it had a value.
+    //
+    // The rvalue overloads below make the UNGUARDABLE form (`Foo().GetValue()` — a temporary, so
+    // there is no variable anyone could have checked) a compile error. This hook covers the form
+    // the compiler cannot see: a NAMED result whose guard is missing, or wrong.
+    //
+    // No logger lives in this repository on purpose, so the report is a host-installed function
+    // rather than a call into one. A host that installs nothing still gets the message on stderr —
+    // silence is never the default. Install once at startup; it is not synchronised because it is
+    // written before any worker exists and only read afterwards.
+    // Header-only on purpose: ~100 engine files and every tool in the workspace include this header,
+    // and their generated makefiles list source files EXPLICITLY. An out-of-line definition here
+    // would link only for the targets that happen to compile the submodule's Source/, so the ones
+    // that do not would fail to link over a diagnostic.
+    using ResultUnwrapReporter = void ( * )( const char* message );
+
+    inline ResultUnwrapReporter& ResultUnwrapReporterSlot()
+    {
+        static ResultUnwrapReporter s_Reporter = nullptr;
+        return s_Reporter;
+    }
+
+    inline void SetResultUnwrapReporter( ResultUnwrapReporter reporter )
+    {
+        ResultUnwrapReporterSlot() = reporter;
+    }
+
+    inline void ReportFailedUnwrap( const std::string& error )
+    {
+        const std::string message = "A FAILED result was unwrapped and its value used. The failure said: " + error;
+        if ( ResultUnwrapReporterSlot() )
+        {
+            ResultUnwrapReporterSlot()( message.c_str() );
+            return;
+        }
+        std::fputs( message.c_str(), stderr );
+        std::fputc( '\n', stderr );
+    }
+
     template <typename T>
     class ResultStr;
 
@@ -82,25 +129,48 @@ namespace Common
             return m_IsSuccess;
         }
 
-        const T& GetValue() const
+        // THE RVALUE OVERLOAD IS DELETED, AND THAT IS THE ONLY PART OF THIS THE COMPILER CAN ENFORCE.
+        //
+        // `Foo().GetValue()` unwraps a TEMPORARY: there is no variable in the caller's hands, so no
+        // reviewer, no census and no amount of care can ever add the missing check to it — the form is
+        // unguardable by construction. Nine such sites existed in the engine when this was written
+        // (four in MaterialExecutor, two in VulkanQueue, two in VulkanSwapChain, one in
+        // SceneEnvironment), and each of them wrote a possibly-null handle or shared_ptr into a member
+        // and carried on. Deleting the rvalue overload makes every one of them a compile error, which
+        // is why the migration was done by the compiler rather than by eye.
+        //
+        // The lvalue form still compiles unchecked — C++ cannot express "this was tested" in the type
+        // system without rewriting all ~145 call sites into a callback or pointer shape, which was
+        // measured and refused (see the task report). What it no longer does is stay SILENT: an
+        // unwrap of a failure reports through ReportFailedUnwrap above, naming the error it is
+        // discarding. The remaining lvalue sites are held by the ResultUnwrapCensus gate.
+        const T& GetValue() const&
         {
             if ( !m_IsSuccess )
             {
-                // NOTE: This is dangerous for non-POD types, but T is often shared_ptr or bool
-                static T empty{};
+                ReportFailedUnwrap( GetError() );
+                // Const on purpose, and const is load-bearing. This used to be a mutable static
+                // returned by a non-const overload, i.e. ONE process-wide object shared by every
+                // failed unwrap of this T, writable by any caller and read by all the others.
+                static const T empty{};
                 return empty;
             }
             return std::get<T>( m_Outcome );
         }
 
-        T ExtractValue()
+        const T& GetValue() const&& = delete;
+
+        T ExtractValue() &
         {
             if ( !m_IsSuccess )
             {
+                ReportFailedUnwrap( GetError() );
                 return T{};
             }
             return std::move( std::get<T>( m_Outcome ) );
         }
+
+        T ExtractValue() && = delete;
 
         std::string GetError() const
         {
