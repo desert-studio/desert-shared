@@ -99,8 +99,21 @@ namespace Common::Project
         std::string DefaultScene = ""; // relative to the project directory; "" = no startup scene
         // Free text shown on the launcher's project tile and on its settings screen. "" = none.
         std::string Description = "";
-        // The engine version that last wrote this descriptor, for diagnosis and for the collection
-        // compatibility check — NOT for choosing an engine (L2 §2.3 refuses a per-project picker).
+        // THE ENGINE THE PROJECT WAS CREATED WITH. Written ONCE, by the launcher, at creation; no
+        // engine build stamps it again. For diagnosis and for the launcher's project tile.
+        //
+        // Two things this comment used to claim, both false, both corrected by К4 — recorded because
+        // the false version is what kept the defect alive:
+        //   * "the engine version that LAST WROTE this descriptor" — it was stamped on every save with
+        //     Common::Version::Full(), a string carrying one machine's commit hash and its `.dirty`
+        //     flag, into a file git tracks and the whole team shares. It meant "whichever developer
+        //     last happened to pick a startup scene", and the churn travelled in commits.
+        //   * "for the collection compatibility check" — that check reads Common::Version::CommitCount()
+        //     and has never read this field. Nothing read it at all.
+        // A field with no readers whose comment names two is worse than an undocumented one: the
+        // comment is what stopped anyone from asking.
+        //
+        // Still NOT for choosing an engine (L2 §2.3 refuses a per-project picker).
         std::string EngineVersion = "";
 
         ForeignKeys UnknownKeys; // see ForeignKeys above — NOT a field of the format
